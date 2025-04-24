@@ -1,12 +1,20 @@
 # app/api/ffmpeg_api.py
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+import secrets
+from fastapi import Depends, FastAPI, UploadFile, File, HTTPException
+from fastapi import security
+from fastapi.responses import FileResponse, JSONResponse
 import subprocess
 import os
 import uuid
 from pathlib import Path
 
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 app = FastAPI()
+security = HTTPBearer()
+
+# Load from environment or generate
+API_AUTH_TOKEN = 'abcXyz123_4mK9LpOqRstUvWxYz0123456789abcdef'
 
 # Configuration
 INPUT_DIR = "inputs"
@@ -18,10 +26,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 async def merge_video_audio(
     video_file: UploadFile = File(...),
     audio_file: UploadFile = File(...),
-    output_format: str = "mp4"
+    output_format: str = "mp4",
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Merge video and audio streams"""
     try:
+        if credentials.credentials != API_AUTH_TOKEN:
+            raise HTTPException(status_code=403, detail="Invalid credentials")
+        
         # Save uploaded files
         video_path = Path(INPUT_DIR) / f"video_{uuid.uuid4().hex}.tmp"
         audio_path = Path(INPUT_DIR) / f"audio_{uuid.uuid4().hex}.tmp"
@@ -57,9 +69,15 @@ async def merge_video_audio(
         )
 
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"FFmpeg error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"FFmpeg processing failed: {str(e)}"}
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
     finally:
         # Cleanup if files exist
         if 'video_path' in locals() and video_path.exists():
